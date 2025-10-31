@@ -10,7 +10,7 @@ import ScrollIndicator from './components/ScrollIndicator'
 import { createClient } from './lib/supabaseClient'
 const schedule = [
   {
-    time: '4:00 PM',
+    time: '4:30-5 PM',
     title: 'Doors Open',
     detail: 'THIS IS HALLOWEEEN, THIS IS HALLOWEEN.',
   },
