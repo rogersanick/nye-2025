@@ -78,7 +78,7 @@ export default function DramaticCountdown({
           </div>
           <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <div
-              className="ny-countdown-time font-mono text-4xl font-semibold tracking-tight text-white sm:text-5xl md:text-6xl tabular-nums"
+              className="ny-countdown-time font-mono text-4xl font-semibold tabular-nums tracking-tight text-white sm:text-5xl md:text-6xl"
               aria-live="polite"
               aria-label={`Time remaining ${timeText}`}
             >
@@ -129,5 +129,3 @@ export default function DramaticCountdown({
     </div>
   )
 }
-
-

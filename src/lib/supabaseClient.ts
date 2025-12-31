@@ -1,7 +1,8 @@
 import { createClient as createSupabaseClient, type SupabaseClient } from '@supabase/supabase-js'
 
-const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL ||
-  import.meta.env.SUPABASE_URL) as string | undefined
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL) as
+  | string
+  | undefined
 
 // Supabase now recommends "publishable" keys (sb_publishable_...).
 // In Vite, env vars must be prefixed with VITE_ to be exposed to the client.

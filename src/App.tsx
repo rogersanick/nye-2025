@@ -59,14 +59,47 @@ function formatSupabaseDataError(err: MaybePostgrestError | null | undefined) {
   return `Supabase error${status ? ` (${status})` : ''}: ${err.message ?? 'Unknown error'}`
 }
 
-function useHashRoute() {
-  const [hash, setHash] = useState(() => window.location.hash || '#')
+function useLocationSnapshot() {
+  const [snap, setSnap] = useState(() => ({
+    pathname: window.location.pathname || '/',
+    hash: window.location.hash || '#',
+  }))
+
   useEffect(() => {
-    const onHashChange = () => setHash(window.location.hash || '#')
+    const update = () =>
+      setSnap({
+        pathname: window.location.pathname || '/',
+        hash: window.location.hash || '#',
+      })
+
+    const onHashChange = () => update()
+    const onPopState = () => update()
+
     window.addEventListener('hashchange', onHashChange)
-    return () => window.removeEventListener('hashchange', onHashChange)
+    window.addEventListener('popstate', onPopState)
+
+    const origPushState = window.history.pushState
+    const origReplaceState = window.history.replaceState
+
+    // Ensure SPA navigation (pushState/replaceState) re-renders.
+    window.history.pushState = function (...args: Parameters<History['pushState']>) {
+      origPushState.apply(window.history, args as any)
+      update()
+    } as any
+    window.history.replaceState = function (...args: Parameters<History['replaceState']>) {
+      origReplaceState.apply(window.history, args as any)
+      update()
+    } as any
+
+    return () => {
+      window.removeEventListener('hashchange', onHashChange)
+      window.removeEventListener('popstate', onPopState)
+      window.history.pushState = origPushState
+      window.history.replaceState = origReplaceState
+    }
   }, [])
-  return hash
+
+  return snap
 }
 
 function NewYearsBackdrop({ confetti }: { confetti: boolean }) {
@@ -217,7 +250,9 @@ function getTimeZoneOffsetMs(date: Date, timeZone: string) {
 }
 
 function zonedTimeToUtc(parts: DateParts, timeZone: string) {
-  const utcGuess = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second))
+  const utcGuess = new Date(
+    Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second),
+  )
   const offset1 = getTimeZoneOffsetMs(utcGuess, timeZone)
   const utc = new Date(utcGuess.getTime() - offset1)
   // DST boundary safety: re-check once.
@@ -245,9 +280,10 @@ function sanitizeFilename(name: string) {
 function App() {
   const scrollContainerRef = useRef<HTMLDivElement>(null!)
   const supabaseRef = useRef(createClient())
-  const route = useHashRoute()
+  const loc = useLocationSnapshot()
 
-  const isGregRoute = route.startsWith('#/greg')
+  const isGregRoute =
+    /^\/greg\/?$/i.test(loc.pathname) || (loc.hash || '#').toLowerCase().startsWith('#/greg')
 
   const [confetti, setConfetti] = useState(false)
 
@@ -310,18 +346,18 @@ function App() {
     const load = async () => {
       const [{ data: goalsData, error: goalsError }, { data: updateData, error: updateError }] =
         await Promise.all([
-        sb
-          .from('goals_2025')
-          .select('id,display_name,title,created_at')
-          .order('created_at', { ascending: false })
-          .limit(50),
-        sb
-          .from('greg_updates')
-          .select('id,title,body,video_path,created_at')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-      ])
+          sb
+            .from('goals_2025')
+            .select('id,display_name,title,created_at')
+            .order('created_at', { ascending: false })
+            .limit(50),
+          sb
+            .from('greg_updates')
+            .select('id,title,body,video_path,created_at')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ])
 
       const pretty = formatSupabaseDataError((goalsError ?? updateError) as any)
       setSupabaseDataError(pretty)
@@ -437,12 +473,10 @@ function App() {
       const safeName = sanitizeFilename(updateVideoFile.name || 'greg-update.mp4')
       const videoPath = `${new Date().toISOString().slice(0, 10)}/${Date.now()}-${safeName}`
 
-      const uploadRes = await sb.storage
-        .from('greg-videos')
-        .upload(videoPath, updateVideoFile, {
-          upsert: false,
-          contentType: updateVideoFile.type || undefined,
-        })
+      const uploadRes = await sb.storage.from('greg-videos').upload(videoPath, updateVideoFile, {
+        upsert: false,
+        contentType: updateVideoFile.type || undefined,
+      })
 
       if (uploadRes.error) {
         setGregActionError(
@@ -494,8 +528,10 @@ function App() {
                   Greg’s HQ (Denver)
                 </h1>
                 <a
-                  href="#welcome"
-                  onClick={() => {
+                  href="/#welcome"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    window.history.pushState({}, '', '/')
                     window.location.hash = '#welcome'
                   }}
                   className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white/80 backdrop-blur transition hover:bg-white/10"
@@ -506,7 +542,8 @@ function App() {
 
               {!supabaseRef.current ? (
                 <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
-                  Supabase is not configured (missing `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY`).
+                  Supabase is not configured (missing `VITE_SUPABASE_URL` /
+                  `VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY`).
                 </div>
               ) : !expectedPassword ? (
                 <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
@@ -680,15 +717,6 @@ function App() {
                 Watch Greg’s latest update
               </a>
             </div>
-
-            <div className="pointer-events-auto absolute bottom-5 right-5">
-              <a
-                href="#/greg"
-                className="ny-glass rounded-lg px-3 py-2 text-xs text-white/75 transition hover:bg-white/10"
-              >
-                Greg
-              </a>
-            </div>
           </div>
         </section>
 
@@ -706,13 +734,14 @@ function App() {
 
             {!supabaseRef.current ? (
               <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-white/80 backdrop-blur">
-                Supabase is not configured (missing `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY`).
+                Supabase is not configured (missing `VITE_SUPABASE_URL` /
+                `VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY`).
               </div>
-              ) : supabaseDataError ? (
-                <div className="rounded-2xl border border-rose-400/25 bg-rose-500/10 p-6 text-white/85 backdrop-blur">
-                  <div className="font-semibold text-white">Supabase setup issue</div>
-                  <div className="mt-2 text-sm text-white/80">{supabaseDataError}</div>
-                </div>
+            ) : supabaseDataError ? (
+              <div className="rounded-2xl border border-rose-400/25 bg-rose-500/10 p-6 text-white/85 backdrop-blur">
+                <div className="font-semibold text-white">Supabase setup issue</div>
+                <div className="mt-2 text-sm text-white/80">{supabaseDataError}</div>
+              </div>
             ) : latestUpdate ? (
               <div className="grid gap-6 lg:grid-cols-2">
                 <div className="ny-glass relative overflow-hidden rounded-3xl p-6">
@@ -809,10 +838,13 @@ function App() {
           </div>
         </section>
 
-        <section id="submit" className="relative h-dvh snap-start overflow-hidden">
-          <div className="mx-auto flex h-full max-w-5xl flex-col justify-center px-6 py-10">
+        <section
+          id="submit"
+          className="relative min-h-dvh snap-start overflow-visible md:h-dvh md:overflow-hidden"
+        >
+          <div className="mx-auto flex min-h-dvh max-w-5xl flex-col justify-start justify-center px-6 py-6 md:h-full md:py-10">
             <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="ny-glass relative overflow-hidden rounded-3xl p-8">
+              <div className="ny-glass relative overflow-hidden rounded-3xl p-5 sm:p-6 md:p-8">
                 <div className="ny-glow-orbs absolute inset-0 opacity-35" />
                 <div className="relative">
                   <h2 className="ny-title text-3xl font-semibold text-white md:text-4xl">
@@ -827,7 +859,7 @@ function App() {
                     <div>
                       <label className="block text-sm font-medium text-white/75">Your name</label>
                       <input
-                        className="mt-2 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-ice/30"
+                        className="mt-2 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-2.5 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-ice/30 md:py-3"
                         value={displayName}
                         onChange={(e) => setDisplayName(e.target.value)}
                         placeholder="e.g. Nicole"
@@ -837,7 +869,7 @@ function App() {
                     <div>
                       <label className="block text-sm font-medium text-white/75">Short title</label>
                       <input
-                        className="mt-2 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-gold/25"
+                        className="mt-2 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-2.5 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-gold/25 md:py-3"
                         value={goalTitle}
                         onChange={(e) => setGoalTitle(e.target.value)}
                         placeholder="e.g. Run a 10K"
@@ -849,7 +881,7 @@ function App() {
                         The full goal (Greg reads this)
                       </label>
                       <textarea
-                        className="mt-2 h-36 w-full resize-none rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-aurora/25"
+                        className="mt-2 h-28 w-full resize-none rounded-xl border border-white/15 bg-black/25 px-4 py-2.5 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-aurora/25 md:h-36 md:py-3"
                         value={goalText}
                         onChange={(e) => setGoalText(e.target.value)}
                         placeholder="Write the details, the why, the how…"
@@ -866,7 +898,7 @@ function App() {
 
                     <button
                       disabled={goalSubmitLoading || !supabaseRef.current}
-                      className="ny-sheen inline-flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-gold via-white to-ice px-6 py-4 text-sm font-semibold text-midnight shadow-[0_18px_60px_rgba(125,211,252,0.12)] disabled:opacity-60"
+                      className="ny-sheen inline-flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-gold via-white to-ice px-6 py-3 text-sm font-semibold text-midnight shadow-[0_18px_60px_rgba(125,211,252,0.12)] disabled:opacity-60 md:py-4"
                       type="submit"
                     >
                       {goalSubmitLoading
@@ -879,7 +911,7 @@ function App() {
                 </div>
               </div>
 
-              <div className="ny-glass rounded-3xl p-8">
+              <div className="ny-glass hidden rounded-3xl p-8 lg:block">
                 <h3 className="ny-title text-xl font-semibold text-white">What happens next?</h3>
                 <ol className="mt-4 space-y-3 text-sm text-white/70">
                   <li>
@@ -895,6 +927,31 @@ function App() {
                     momentum.
                   </li>
                 </ol>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="greg" className="relative h-dvh snap-start overflow-hidden">
+          <div className="mx-auto flex h-full max-w-5xl flex-col justify-center px-6 py-10">
+            <div className="ny-glass relative overflow-hidden rounded-3xl p-8 text-center">
+              <div className="ny-glow-orbs absolute inset-0 opacity-35" />
+              <div className="relative">
+                <h2 className="ny-title text-3xl font-semibold text-white md:text-4xl">
+                  Are you Greg?
+                </h2>
+                <p className="mt-3 text-sm text-white/70">If yes, click here for the admin view.</p>
+                <a
+                  href="/Greg"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    window.history.pushState({}, '', '/Greg')
+                    scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' })
+                  }}
+                  className="ny-sheen mt-6 inline-flex items-center justify-center rounded-xl bg-white px-5 py-3 text-sm font-semibold text-midnight transition hover:bg-white/90"
+                >
+                  See admin view.
+                </a>
               </div>
             </div>
           </div>
