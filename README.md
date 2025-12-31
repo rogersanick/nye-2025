@@ -1,6 +1,8 @@
-# Halloween Party RSVP
+# Virtual New Year’s 2025
 
-This app now includes an RSVP form and attendee list powered by Supabase.
+A tiny virtual New Year’s celebration site where guests submit their **2025 goals**, and Greg (Nick’s dad, in Denver) posts a video + written update and reads goals aloud with commentary.
+
+This project uses **React + Vite + Tailwind + r3f/drei** and **Supabase** for storage + database.
 
 ## Setup
 
@@ -14,32 +16,35 @@ npm install
 
 ```bash
 VITE_SUPABASE_URL=your_url
-VITE_SUPABASE_ANON_KEY=your_anon_key
+VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY=your_publishable_key  # (sb_publishable_...)
+
+# Optional: enables password gate for #/greg (client-side only)
+VITE_GREG_PAGE_PASSWORD=some_password
 ```
 
-3. Supabase table (SQL):
+3. Supabase schema (SQL):
 
-```sql
-create table if not exists public.rsvps (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  costume text,
-  coming boolean not null default true,
-  created_at timestamp with time zone not null default now()
-);
+- Run [`supabase/migrations/20251231000100_init.sql`](supabase/migrations/20251231000100_init.sql) in the Supabase SQL editor.
+- Then run [`supabase/migrations/20251231000200_storage_greg_videos.sql`](supabase/migrations/20251231000200_storage_greg_videos.sql).
 
--- Enable RLS and allow inserts/selects
-alter table public.rsvps enable row level security;
-create policy "Allow public inserts" on public.rsvps
-  for insert to public with check (true);
-create policy "Allow public reads" on public.rsvps
-  for select to public using (true);
-```
+Tables created:
 
-4. Start dev server:
+- `public.goals_2025` (stores goal title + full text)
+- `public.greg_updates` (stores Greg’s message + Storage video path)
+
+Important note: this project intentionally uses **no RLS**. We hide full goal text in the public UI by only selecting `id, display_name, title, created_at` on the guest pages.
+
+4. Storage bucket
+
+- Create a Storage bucket named **`greg-videos`**
+- Set it to **Public** so the site can play Greg’s video via a public URL.
+
+5. Start dev server:
 
 ```bash
 npm run dev
 ```
 
-The RSVP section includes fields for name, costume, and whether you’re coming. It shows a live list of those attending.
+## How to use
+
+- **Guests**: open the site, submit a goal, and see the goal title on the wall.\n- **Greg**: visit `#/greg`, enter the password (`VITE_GREG_PAGE_PASSWORD`), then:\n - see all goals including full text\n - upload a video + publish an update (writes to `greg_updates` and uploads into `greg-videos`)

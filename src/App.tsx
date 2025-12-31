@@ -1,549 +1,912 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { useGLTF, View } from '@react-three/drei'
-import { CuboidCollider, Physics, RigidBody } from '@react-three/rapier'
-import type { RapierRigidBody } from '@react-three/rapier'
-import { Plane, Raycaster, Vector2, Vector3 } from 'three'
-import type { Object3D } from 'three'
+import { Environment, Sparkles, Stars } from '@react-three/drei'
+import { Vector3 } from 'three'
 
 import ScrollIndicator from './components/ScrollIndicator'
+import ExplosionConfetti from './components/confetti'
+import { ShaderFireworks } from './components/ShaderFireworks'
+import DramaticCountdown from './components/DramaticCountdown'
 import { createClient } from './lib/supabaseClient'
-const schedule = [
-  {
-    time: '4:30-5 PM',
-    title: 'Doors Open',
-    detail: 'THIS IS HALLOWEEEN, THIS IS HALLOWEEN.',
-  },
-  {
-    time: '8:00 PM',
-    title: 'Winner Announcement',
-    detail: 'We will announce the winner of the costume contest.',
-  },
-  { time: '10:00 PM', title: 'Bedtime', detail: 'Time to say goodbye and head home.' },
-]
 
-const INITIAL_PUMPKINS = 100
-const MAX_PUMPKINS = 45
-const PUMPKIN_LIFETIME = 30000
-const CLEANUP_HEIGHT = -6
-const GROUND_TILT = 0
-const CURSOR_PLANE_HEIGHT = 1.2
-
-type PumpkinData = {
-  id: number
-  rotation: [number, number, number]
-  position: [number, number, number]
-  scale: number
-  createdAt: number
+type GoalPublicRow = {
+  id: string
+  display_name: string
+  title: string
+  created_at: string
 }
 
-function PumpkinInstance({
-  data,
-  model,
-  onRemove,
-}: {
-  data: PumpkinData
-  model: Object3D
-  onRemove: (id: number) => void
-}) {
-  const bodyRef = useRef<RapierRigidBody | null>(null)
-  const hasRemoved = useRef(false)
-  const clonedScene = useMemo(() => model.clone(), [model])
+type GoalFullRow = GoalPublicRow & { goal_text: string }
 
-  useFrame(() => {
-    if (hasRemoved.current || !bodyRef.current) return
-
-    const { y } = bodyRef.current.translation()
-    if (y < CLEANUP_HEIGHT) {
-      hasRemoved.current = true
-      onRemove(data.id)
-    }
-  })
-
-  return (
-    <RigidBody
-      ref={bodyRef}
-      colliders="ball"
-      restitution={0.7}
-      rotation={data.rotation}
-      friction={0.3}
-      position={data.position}
-    >
-      <primitive
-        object={clonedScene}
-        scale={data.scale}
-        rotation={data.rotation}
-        castShadow
-        receiveShadow
-      />
-    </RigidBody>
-  )
+type GregUpdateRow = {
+  id: string
+  title: string
+  body: string
+  video_path: string
+  created_at: string
 }
 
-function CursorBumper() {
-  const bodyRef = useRef<RapierRigidBody | null>(null)
-  const pointer = useRef(new Vector2(0, 0))
-  const { camera, size } = useThree()
+type MaybePostgrestError = {
+  code?: string
+  message?: string
+  details?: string | null
+  hint?: string | null
+  status?: number
+}
 
-  const plane = useMemo(() => new Plane(new Vector3(0, 1, 0), -CURSOR_PLANE_HEIGHT), [])
-  const raycaster = useMemo(() => new Raycaster(), [])
-  const intersectionPoint = useMemo(() => new Vector3(), [])
+function formatSupabaseDataError(err: MaybePostgrestError | null | undefined) {
+  if (!err) return null
+  const status = typeof err.status === 'number' ? err.status : undefined
+  const code = err.code || ''
+  const msg = (err.message || '').toLowerCase()
 
+  // Common case when the app points at the wrong Supabase project (table doesn't exist there).
+  const isMissingRelation =
+    status === 404 ||
+    code === '42P01' ||
+    msg.includes('not found') ||
+    msg.includes('relation') ||
+    msg.includes('does not exist')
+
+  if (isMissingRelation) {
+    return [
+      'Supabase returned “table not found”.',
+      'This usually means your `VITE_SUPABASE_URL` is pointing at a Supabase project where the migration was not run.',
+      'Fix: run `supabase/migrations/20251231000100_init.sql` in *that* project (SQL editor), or update your env vars to the correct project.',
+    ].join(' ')
+  }
+
+  return `Supabase error${status ? ` (${status})` : ''}: ${err.message ?? 'Unknown error'}`
+}
+
+function useHashRoute() {
+  const [hash, setHash] = useState(() => window.location.hash || '#')
   useEffect(() => {
-    const handlePointerMove = (event: PointerEvent) => {
-      pointer.current.set(
-        (event.clientX / size.width) * 2 - 1,
-        -(event.clientY / size.height) * 2 + 1,
-      )
-    }
-
-    window.addEventListener('pointermove', handlePointerMove)
-    return () => window.removeEventListener('pointermove', handlePointerMove)
-  }, [size.height, size.width])
-
-  useFrame(() => {
-    if (!bodyRef.current) return
-
-    raycaster.setFromCamera(pointer.current, camera)
-    const point = raycaster.ray.intersectPlane(plane, intersectionPoint)
-
-    if (point) {
-      bodyRef.current.setNextKinematicTranslation({ x: point.x, y: point.y, z: point.z })
-    }
-  })
-
-  return (
-    <RigidBody
-      type="kinematicPosition"
-      colliders="ball"
-      ref={bodyRef}
-      enabledRotations={[false, false, false]}
-    >
-      <mesh visible={false}>
-        <sphereGeometry args={[0.45, 16, 16]} />
-        <meshBasicMaterial transparent opacity={0} />
-      </mesh>
-    </RigidBody>
-  )
-}
-
-function LandingViewScene() {
-  const { scene } = useGLTF('/jackolantern.glb')
-
-  const pumpkinTemplate = useMemo(() => {
-    const preparedScene = scene.clone()
-    preparedScene.traverse((child) => {
-      if (child.type === 'Mesh' && (child as any).material) {
-        const mesh = child as any
-        if (child.name.toLowerCase().includes('pumpkin')) {
-          mesh.material.color.set('#ff6600')
-        } else if (child.name.toLowerCase().includes('vine')) {
-          mesh.material.color.set('#228b22')
-        }
-      }
-    })
-
-    return preparedScene
-  }, [scene])
-
-  const [pumpkins, setPumpkins] = useState<PumpkinData[]>(() => {
-    const now = Date.now()
-    return Array.from({ length: INITIAL_PUMPKINS }, (_, index) => ({
-      id: index,
-      position: [(Math.random() - 0.5) * 4, Math.random() * 4 + 4, (Math.random() - 1) * 4],
-      rotation: [0, Math.random() * 2 * Math.PI, 0],
-      scale: Math.random() * 0.8 + 0.3,
-      createdAt: now - Math.random() * 2000,
-    }))
-  })
-
-  const nextId = useRef(pumpkins.length)
-
-  const generatePumpkin = useCallback((): PumpkinData => {
-    const id = nextId.current++
-    return {
-      id,
-      position: [(Math.random() - 0.5) * 8, Math.random() * 4 + 6, (Math.random() - 0.5) * 8],
-      rotation: [0, Math.random() * 2 * Math.PI, 0],
-      scale: Math.random() * 0.8 + 0.3,
-      createdAt: Date.now(),
-    }
-  }, [nextId])
-
-  const removePumpkin = useCallback((id: number) => {
-    setPumpkins((previous) => previous.filter((pumpkin) => pumpkin.id !== id))
+    const onHashChange = () => setHash(window.location.hash || '#')
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
+  return hash
+}
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setPumpkins((previous) => {
-        const now = Date.now()
-        const filtered = previous.filter((pumpkin) => now - pumpkin.createdAt < PUMPKIN_LIFETIME)
-        const nextPumpkin = generatePumpkin()
-        const withNext = [...filtered, nextPumpkin]
-        return withNext.slice(-MAX_PUMPKINS)
+function NewYearsBackdrop({ confetti }: { confetti: boolean }) {
+  const shaderFireworksRef = useRef<{
+    spawn: (
+      position: Vector3,
+      options?: {
+        count?: number
+        radius?: number
+        size?: number
+        duration?: number
+        shape?: 'sphere' | 'ring' | 'palm' | 'disc'
+        texture?: 'soft' | 'ring' | 'spark' | 'streak'
+      },
+    ) => void
+  } | null>(null)
+
+  const { camera } = useThree()
+  const spawnClock = useRef(0)
+  const tmp = useMemo(
+    () => ({
+      ndc: new Vector3(),
+      dir: new Vector3(),
+      pos: new Vector3(),
+    }),
+    [],
+  )
+
+  useFrame((_, delta) => {
+    const shader = shaderFireworksRef.current
+    if (!shader) return
+
+    // Spawn fireworks evenly across the viewport (screen-space distribution).
+    spawnClock.current += delta
+    const cadence = confetti ? 0.8 : 1.25 // less frequent overall
+    if (spawnClock.current < cadence) return
+    spawnClock.current = 0
+
+    const textures: Array<'soft' | 'spark' | 'streak'> = ['soft', 'spark', 'streak']
+
+    const bursts = Math.random() < 0.25 ? 2 : 1
+    for (let i = 0; i < bursts; i++) {
+      // Random NDC x/y => uniform over screen.
+      const x = Math.random() * 2 - 1
+      const y = Math.random() * 2 - 1
+
+      // Create a world direction through that screen point.
+      tmp.ndc.set(x, y, 0.0).unproject(camera)
+      tmp.dir.copy(tmp.ndc).sub(camera.position).normalize()
+
+      // Place the explosion somewhere in front of camera, deeper into the scene.
+      const dist = 10 + Math.random() * 14
+      tmp.pos.copy(camera.position).add(tmp.dir.multiplyScalar(dist))
+
+      shader.spawn(tmp.pos, {
+        count: Math.round(650 + Math.random() * 1250),
+        radius: 0.9 + Math.random() * 1.7,
+        size: 0.05 + Math.random() * 0.06,
+        duration: 4.2 + Math.random() * 2.4, // slower + longer
+        shape: 'sphere',
+        texture: textures[Math.floor(Math.random() * textures.length)],
       })
-    }, 1500)
-
-    return () => window.clearInterval(interval)
-  }, [generatePumpkin])
+    }
+  })
 
   return (
     <>
-      <ambientLight intensity={1} />
-      <directionalLight position={[4, 6, 5]} intensity={1.15} castShadow />
-      <Physics gravity={[0, -2, 0]}>
-        {pumpkins.map((pumpkin) => (
-          <PumpkinInstance
-            key={pumpkin.id}
-            data={pumpkin}
-            model={pumpkinTemplate}
-            onRemove={removePumpkin}
-          />
-        ))}
+      <color attach="background" args={['#060917']} />
+      <ambientLight intensity={0.65} />
+      <directionalLight position={[6, 8, 6]} intensity={1.1} />
+      <Environment preset="city" />
+      <fog attach="fog" args={['#060917', 8, 20]} />
 
-        <CursorBumper />
+      <Stars radius={140} depth={55} count={3800} factor={4} fade speed={1} />
+      <Sparkles count={260} scale={16} size={2} speed={0.55} opacity={0.75} color="#f7d46a" />
 
-        {/* Invisible walls to contain pumpkins */}
-        <RigidBody type="fixed" colliders={false}>
-          <CuboidCollider args={[0.1, 10, 8]} position={[-6, 5, 0]} />
-          <CuboidCollider args={[0.1, 10, 8]} position={[6, 5, 0]} />
-          <CuboidCollider args={[8, 10, 0.1]} position={[0, 5, -6]} />
-          <CuboidCollider args={[8, 10, 0.1]} position={[0, 5, 6]} />
-        </RigidBody>
+      {/* Shader fireworks (explosions) */}
+      <ShaderFireworks ref={shaderFireworksRef as any} />
 
-        {/* Ground with cleanup trigger */}
-        <RigidBody type="fixed" colliders={false} position={[0, -2, 0]}>
-          <CuboidCollider args={[8, 0.25, 8]} rotation={[GROUND_TILT, 0, 0]} />
-          <mesh rotation={[-Math.PI / 2 + GROUND_TILT, 0, 0]} receiveShadow>
-            <circleGeometry args={[9, 64]} />
-            <meshStandardMaterial color="#0f172a" roughness={1} transparent opacity={0} />
-          </mesh>
-        </RigidBody>
-
-        {/* Cleanup zone below ground */}
-        <RigidBody type="fixed" colliders={false} position={[0, -8, 0]}>
-          <CuboidCollider args={[10, 1, 10]} sensor />
-        </RigidBody>
-      </Physics>
+      <ExplosionConfetti
+        isExploding={confetti}
+        amount={130}
+        rate={6}
+        radius={10}
+        areaWidth={4}
+        areaHeight={1}
+        fallingHeight={9}
+        fallingSpeed={6}
+        colors={[0xf7d46a, 0xffffff, 0x60a5fa, 0xa78bfa]}
+        enableShadows={false}
+      />
     </>
   )
+}
+
+function formatWhen(iso: string) {
+  const d = new Date(iso)
+  return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+}
+
+type DateParts = {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  second: number
+}
+
+function getZonedDateParts(date: Date, timeZone: string): DateParts {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+
+  const parts = dtf.formatToParts(date)
+  const map: Record<string, string> = {}
+  for (const p of parts) {
+    if (p.type !== 'literal') map[p.type] = p.value
+  }
+
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour),
+    minute: Number(map.minute),
+    second: Number(map.second),
+  }
+}
+
+function addDaysToYmd(ymd: Pick<DateParts, 'year' | 'month' | 'day'>, days: number) {
+  const base = new Date(Date.UTC(ymd.year, ymd.month - 1, ymd.day))
+  base.setUTCDate(base.getUTCDate() + days)
+  return { year: base.getUTCFullYear(), month: base.getUTCMonth() + 1, day: base.getUTCDate() }
+}
+
+function getTimeZoneOffsetMs(date: Date, timeZone: string) {
+  const p = getZonedDateParts(date, timeZone)
+  const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)
+  return asUTC - date.getTime()
+}
+
+function zonedTimeToUtc(parts: DateParts, timeZone: string) {
+  const utcGuess = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second))
+  const offset1 = getTimeZoneOffsetMs(utcGuess, timeZone)
+  const utc = new Date(utcGuess.getTime() - offset1)
+  // DST boundary safety: re-check once.
+  const offset2 = getTimeZoneOffsetMs(utc, timeZone)
+  if (offset2 !== offset1) return new Date(utcGuess.getTime() - offset2)
+  return utc
+}
+
+function getNextNinePmEasternUtc(now: Date) {
+  const tz = 'America/New_York'
+  const p = getZonedDateParts(now, tz)
+  const isBeforeNinePm = p.hour < 21
+  const ymd = addDaysToYmd({ year: p.year, month: p.month, day: p.day }, isBeforeNinePm ? 0 : 1)
+  return zonedTimeToUtc({ ...ymd, hour: 21, minute: 0, second: 0 }, tz)
+}
+
+function sanitizeFilename(name: string) {
+  return name
+    .replace(/[^\w.\-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 120)
 }
 
 function App() {
   const scrollContainerRef = useRef<HTMLDivElement>(null!)
   const supabaseRef = useRef(createClient())
+  const route = useHashRoute()
 
-  type RsvpRow = {
-    id: string
-    name: string
-    costume: string | null
-    coming: boolean
-    created_at: string
-  }
+  const isGregRoute = route.startsWith('#/greg')
 
-  const [name, setName] = useState('')
-  const [costume, setCostume] = useState('')
-  const [coming, setComing] = useState(true)
-  const [submitLoading, setSubmitLoading] = useState(false)
-  const [submitError, setSubmitError] = useState<string | null>(null)
-  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
+  const [confetti, setConfetti] = useState(false)
 
-  const [attendees, setAttendees] = useState<RsvpRow[]>([])
+  // Guest: submit goal
+  const [displayName, setDisplayName] = useState('')
+  const [goalTitle, setGoalTitle] = useState('')
+  const [goalText, setGoalText] = useState('')
+  const [goalSubmitLoading, setGoalSubmitLoading] = useState(false)
+  const [goalSubmitError, setGoalSubmitError] = useState<string | null>(null)
+  const [goalSubmitSuccess, setGoalSubmitSuccess] = useState<string | null>(null)
+
+  // Guest: goals list (NO goal_text fetched here)
+  const [goals, setGoals] = useState<GoalPublicRow[]>([])
+
+  // Guest: latest Greg update
+  const [latestUpdate, setLatestUpdate] = useState<GregUpdateRow | null>(null)
+
+  const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now())
 
   useEffect(() => {
-    const loadAttendees = async () => {
-      if (!supabaseRef.current) return
-      const { data } = await supabaseRef.current
-        .from('rsvps')
-        .select('id,name,costume,coming,created_at')
-        .eq('coming', true)
-        .order('created_at', { ascending: false })
-      setAttendees(data ?? [])
-    }
-    void loadAttendees()
+    const t = window.setInterval(() => setCountdownNowMs(Date.now()), 1000)
+    return () => window.clearInterval(t)
   }, [])
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const nextNinePmEasternUtc = useMemo(
+    () => getNextNinePmEasternUtc(new Date(countdownNowMs)),
+    [countdownNowMs],
+  )
+
+  const msUntilNinePmEastern = nextNinePmEasternUtc.getTime() - countdownNowMs
+  const isDeadlineReached = msUntilNinePmEastern <= 0
+
+  const latestUpdateVideoUrl = useMemo(() => {
+    if (!latestUpdate?.video_path) return null
+    const sb = supabaseRef.current
+    if (!sb) return null
+    const { data } = sb.storage.from('greg-videos').getPublicUrl(latestUpdate.video_path)
+    return data.publicUrl
+  }, [latestUpdate?.video_path])
+
+  // Greg page: password gate
+  const expectedPassword = (import.meta.env.VITE_GREG_PAGE_PASSWORD as string | undefined) ?? ''
+  const [gregUnlocked, setGregUnlocked] = useState(false)
+  const [gregPassword, setGregPassword] = useState('')
+
+  // Greg page: full goals + update creation
+  const [gregGoals, setGregGoals] = useState<GoalFullRow[]>([])
+  const [updateTitle, setUpdateTitle] = useState('')
+  const [updateBody, setUpdateBody] = useState('')
+  const [updateVideoFile, setUpdateVideoFile] = useState<File | null>(null)
+  const [gregActionLoading, setGregActionLoading] = useState(false)
+  const [gregActionError, setGregActionError] = useState<string | null>(null)
+  const [gregActionSuccess, setGregActionSuccess] = useState<string | null>(null)
+  const [supabaseDataError, setSupabaseDataError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const sb = supabaseRef.current
+    if (!sb) return
+
+    const load = async () => {
+      const [{ data: goalsData, error: goalsError }, { data: updateData, error: updateError }] =
+        await Promise.all([
+        sb
+          .from('goals_2025')
+          .select('id,display_name,title,created_at')
+          .order('created_at', { ascending: false })
+          .limit(50),
+        sb
+          .from('greg_updates')
+          .select('id,title,body,video_path,created_at')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ])
+
+      const pretty = formatSupabaseDataError((goalsError ?? updateError) as any)
+      setSupabaseDataError(pretty)
+      if (pretty && import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('Supabase data load error:', { goalsError, updateError })
+      }
+
+      setGoals((goalsData ?? []) as GoalPublicRow[])
+      setLatestUpdate((updateData ?? null) as GregUpdateRow | null)
+    }
+
+    void load()
+  }, [])
+
+  useEffect(() => {
+    if (!confetti) return
+    const t = window.setTimeout(() => setConfetti(false), 2200)
+    return () => window.clearTimeout(t)
+  }, [confetti])
+
+  const handleGoalSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!supabaseRef.current) {
-      setSubmitError('RSVP is not configured. Missing env vars.')
-      return
-    }
-    setSubmitError(null)
-    setSubmitSuccess(null)
-
-    const trimmedName = name.trim()
-    if (!trimmedName) {
-      setSubmitError('Please enter your name')
+    const sb = supabaseRef.current
+    if (!sb) {
+      setGoalSubmitError('Supabase is not configured. Missing env vars.')
       return
     }
 
-    setSubmitLoading(true)
-    const { data, error } = await supabaseRef.current
-      .from('rsvps')
-      .insert({ name: trimmedName, costume: costume.trim() || null, coming })
-      .select('id,name,costume,coming,created_at')
+    setGoalSubmitError(null)
+    setGoalSubmitSuccess(null)
+    const dn = displayName.trim()
+    const title = goalTitle.trim()
+    const text = goalText.trim()
+    if (!dn || !title || !text) {
+      setGoalSubmitError('Please fill out your name, a short title, and your goal.')
+      return
+    }
+
+    setGoalSubmitLoading(true)
+    const { data, error } = await sb
+      .from('goals_2025')
+      .insert({ display_name: dn, title, goal_text: text })
+      .select('id,display_name,title,created_at')
       .single()
 
     if (error) {
-      setSubmitError('Something went wrong. Please try again.')
-    } else {
-      setSubmitSuccess(coming ? "You're on the list!" : 'Saved your response!')
-      // Optimistically update attendee list if they are coming
-      if (data && data.coming) {
-        setAttendees((prev) => [data as RsvpRow, ...prev])
-      }
-      setName('')
-      setCostume('')
-      setComing(true)
+      setGoalSubmitError(
+        formatSupabaseDataError(error as any) ?? 'Something went wrong. Please try again.',
+      )
+    } else if (data) {
+      setGoalSubmitSuccess('Locked in. Greg will read it aloud in Denver.')
+      setConfetti(true)
+      setGoals((prev) => [data as GoalPublicRow, ...prev])
+      setDisplayName('')
+      setGoalTitle('')
+      setGoalText('')
     }
-    setSubmitLoading(false)
+
+    setGoalSubmitLoading(false)
+  }
+
+  const handleGregUnlock = (e: React.FormEvent) => {
+    e.preventDefault()
+    const ok = expectedPassword && gregPassword === expectedPassword
+    if (!ok) return
+    setGregUnlocked(true)
+    setGregPassword('')
+  }
+
+  const loadGregGoals = async () => {
+    const sb = supabaseRef.current
+    if (!sb) return
+    const { data, error } = await sb
+      .from('goals_2025')
+      .select('id,display_name,title,goal_text,created_at')
+      .order('created_at', { ascending: false })
+      .limit(200)
+    const pretty = formatSupabaseDataError(error as any)
+    if (pretty) setGregActionError(pretty)
+    setGregGoals((data ?? []) as GoalFullRow[])
+  }
+
+  useEffect(() => {
+    if (!isGregRoute || !gregUnlocked) return
+    void loadGregGoals()
+  }, [isGregRoute, gregUnlocked])
+
+  const handlePublishGregUpdate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const sb = supabaseRef.current
+    if (!sb) {
+      setGregActionError('Supabase is not configured. Missing env vars.')
+      return
+    }
+
+    setGregActionError(null)
+    setGregActionSuccess(null)
+
+    const t = updateTitle.trim()
+    const b = updateBody.trim()
+    if (!t || !b) {
+      setGregActionError('Please enter a title and a message.')
+      return
+    }
+    if (!updateVideoFile) {
+      setGregActionError('Please choose a video file.')
+      return
+    }
+
+    setGregActionLoading(true)
+    try {
+      const safeName = sanitizeFilename(updateVideoFile.name || 'greg-update.mp4')
+      const videoPath = `${new Date().toISOString().slice(0, 10)}/${Date.now()}-${safeName}`
+
+      const uploadRes = await sb.storage
+        .from('greg-videos')
+        .upload(videoPath, updateVideoFile, {
+          upsert: false,
+          contentType: updateVideoFile.type || undefined,
+        })
+
+      if (uploadRes.error) {
+        setGregActionError(
+          'Video upload failed. Double check the bucket name and that it allows uploads.',
+        )
+        setGregActionLoading(false)
+        return
+      }
+
+      const { data, error } = await sb
+        .from('greg_updates')
+        .insert({ title: t, body: b, video_path: videoPath })
+        .select('id,title,body,video_path,created_at')
+        .single()
+
+      if (error) {
+        setGregActionError(formatSupabaseDataError(error as any) ?? 'Update publish failed.')
+      } else {
+        setGregActionSuccess('Published.')
+        setLatestUpdate((data ?? null) as GregUpdateRow | null)
+        setUpdateTitle('')
+        setUpdateBody('')
+        setUpdateVideoFile(null)
+      }
+    } finally {
+      setGregActionLoading(false)
+    }
+  }
+
+  if (isGregRoute) {
+    return (
+      <>
+        <Canvas
+          dpr={[1, 1.5]}
+          camera={{ position: [0, 1.2, 7], fov: 45 }}
+          eventSource={scrollContainerRef}
+          eventPrefix="client"
+          style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0 }}
+        >
+          <Suspense fallback={null}>
+            <NewYearsBackdrop confetti={false} />
+          </Suspense>
+        </Canvas>
+        <div ref={scrollContainerRef} className="relative min-h-dvh overflow-y-auto text-moonlight">
+          <section className="relative min-h-dvh px-6 py-10">
+            <div className="mx-auto w-full max-w-5xl">
+              <div className="flex items-center justify-between gap-4">
+                <h1 className="text-2xl font-semibold tracking-tight text-white md:text-3xl">
+                  Greg’s HQ (Denver)
+                </h1>
+                <a
+                  href="#welcome"
+                  onClick={() => {
+                    window.location.hash = '#welcome'
+                  }}
+                  className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white/80 backdrop-blur transition hover:bg-white/10"
+                >
+                  Back to party
+                </a>
+              </div>
+
+              {!supabaseRef.current ? (
+                <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+                  Supabase is not configured (missing `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY`).
+                </div>
+              ) : !expectedPassword ? (
+                <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+                  Set `VITE_GREG_PAGE_PASSWORD` to enable the Greg page password gate.
+                </div>
+              ) : !gregUnlocked ? (
+                <form
+                  onSubmit={handleGregUnlock}
+                  className="mt-10 max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur"
+                >
+                  <p className="text-sm text-white/70">Enter the password.</p>
+                  <input
+                    className="mt-3 w-full rounded-lg border border-white/15 bg-black/30 px-4 py-3 text-white placeholder-white/40 outline-none focus:border-white/30"
+                    type="password"
+                    value={gregPassword}
+                    onChange={(e) => setGregPassword(e.target.value)}
+                    placeholder="Password"
+                  />
+                  <button
+                    className="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-white px-4 py-3 font-semibold text-midnight"
+                    type="submit"
+                  >
+                    Unlock
+                  </button>
+                </form>
+              ) : (
+                <div className="mt-10 grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+                    <div className="flex items-center justify-between gap-4">
+                      <h2 className="text-lg font-semibold text-white">All goals (full text)</h2>
+                      <button
+                        className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white/80 transition hover:bg-white/10"
+                        type="button"
+                        onClick={() => void loadGregGoals()}
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {gregGoals.length ? (
+                        gregGoals.map((g) => (
+                          <div
+                            key={g.id}
+                            className="rounded-xl border border-white/10 bg-black/25 p-4"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-baseline gap-2">
+                                <span className="font-semibold text-white">{g.title}</span>
+                                <span className="text-sm text-white/60">by {g.display_name}</span>
+                              </div>
+                              <span className="text-xs text-white/50">
+                                {formatWhen(g.created_at)}
+                              </span>
+                            </div>
+                            <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-white/80">
+                              {g.goal_text}
+                            </p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-white/60">No goals yet.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+                    <h2 className="text-lg font-semibold text-white">Post a Denver update</h2>
+                    <form onSubmit={handlePublishGregUpdate} className="mt-4 space-y-4">
+                      <div>
+                        <label className="text-sm text-white/70">Title</label>
+                        <input
+                          className="mt-2 w-full rounded-lg border border-white/15 bg-black/30 px-4 py-3 text-white placeholder-white/40 outline-none focus:border-white/30"
+                          value={updateTitle}
+                          onChange={(e) => setUpdateTitle(e.target.value)}
+                          placeholder="Tonight’s update…"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-sm text-white/70">Message</label>
+                        <textarea
+                          className="mt-2 h-32 w-full resize-none rounded-lg border border-white/15 bg-black/30 px-4 py-3 text-white placeholder-white/40 outline-none focus:border-white/30"
+                          value={updateBody}
+                          onChange={(e) => setUpdateBody(e.target.value)}
+                          placeholder="Fun words from Denver…"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-sm text-white/70">Video file</label>
+                        <input
+                          className="mt-2 w-full text-sm text-white/70"
+                          type="file"
+                          accept="video/*"
+                          onChange={(e) => setUpdateVideoFile(e.target.files?.[0] ?? null)}
+                        />
+                      </div>
+                      {gregActionError ? (
+                        <p className="text-sm text-red-200">{gregActionError}</p>
+                      ) : null}
+                      {gregActionSuccess ? (
+                        <p className="text-sm text-green-200">{gregActionSuccess}</p>
+                      ) : null}
+                      <button
+                        disabled={gregActionLoading}
+                        className="inline-flex w-full items-center justify-center rounded-lg bg-white px-4 py-3 font-semibold text-midnight disabled:opacity-60"
+                        type="submit"
+                      >
+                        {gregActionLoading ? 'Publishing…' : 'Publish update'}
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      </>
+    )
   }
 
   return (
     <>
       <Canvas
-        shadows
         dpr={[1, 1.5]}
-        camera={{ position: [0, 1.4, 6], fov: 45 }}
+        camera={{ position: [0, 1.2, 7], fov: 45 }}
         eventSource={scrollContainerRef}
         eventPrefix="client"
-        style={{
-          position: 'fixed',
-          inset: 0,
-          pointerEvents: 'none',
-          zIndex: 0,
-        }}
+        style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0 }}
       >
-        <View.Port />
+        <Suspense fallback={null}>
+          <NewYearsBackdrop confetti={confetti} />
+        </Suspense>
       </Canvas>
+
       <div
         id="scroll-container"
         ref={scrollContainerRef}
         className="relative h-dvh snap-y snap-mandatory overflow-y-auto text-moonlight"
       >
         <ScrollIndicator />
-        <section id="home" className="relative h-dvh snap-start overflow-hidden">
-          <View
-            index={1}
-            className="pointer-events-none absolute inset-0 -z-10"
-            style={{ width: '100%', height: '100%' }}
-          >
-            <Suspense fallback={null}>
-              <LandingViewScene />
-            </Suspense>
-          </View>
-          <div className="flex h-full w-full px-8">
-            <div className="pointer-events-none absolute inset-0 -z-20 opacity-60">
-              <div className="absolute -left-24 -top-24 h-72 w-72 rounded-full bg-pumpkin blur-[120px]" />
-              <div className="absolute right-12 top-1/4 h-64 w-64 rounded-full bg-poison/70 blur-[100px]" />
-              <div className="absolute bottom-0 left-1/3 h-72 w-72 rounded-full bg-ember/60 blur-[120px]" />
-            </div>
 
-            <div className="relative z-10 mx-auto flex min-h-full max-w-4xl flex-col items-center justify-center gap-8 px-6 text-center">
-              <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em]">
-                Oct 31 • 4pm — 10pm
+        <section id="welcome" className="relative h-dvh snap-start overflow-hidden">
+          <div className="relative mx-auto flex h-full max-w-5xl flex-col items-center justify-center px-6 text-center">
+            <div className="ny-glow-orbs pointer-events-none absolute inset-0 -z-10" />
+
+            <span className="ny-glass-strong ny-sheen inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-white/85">
+              New Year’s • 2025 • Virtual
+            </span>
+
+            <h1 className="ny-title mt-6 text-balance text-5xl font-bold tracking-tight md:text-7xl">
+              <span className="ny-sheen block bg-gradient-to-r from-gold via-ice to-aurora bg-clip-text text-transparent">
+                2025
               </span>
-              <h1 className="max-w-lg font-spooky text-5xl tracking-wider text-amber-200 drop-shadow-[0_0_25px_rgba(249,115,22,0.45)] md:text-7xl">
-                Besties, Babies, Boos, and Booze
-              </h1>
-              <div className="flex flex-col items-center justify-center gap-2">
-                <p className="max-w-2xl text-lg leading-relaxed text-white/80">
-                  Come one, come all to the spookiest party on Edgewood Lane 👻
-                </p>
-                <p className="max-w-2xl text-lg leading-relaxed text-white/80">
-                  Scroll down to RSVP and add a costumer hint 👀
-                </p>
-              </div>
+              <span className="mt-2 block text-white">{`New Year's Goals`}</span>
+            </h1>
+
+            <p className="mt-5 max-w-2xl text-pretty text-lg leading-relaxed text-white/75">
+              Drop your 2025 goal. Greg (my dad) is in Denver — he’ll read them aloud and deliver
+              elite dad commentary.
+            </p>
+
+            <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+              <a
+                href="#submit"
+                className="ny-sheen rounded-xl bg-gradient-to-r from-gold via-white to-ice px-6 py-3 text-sm font-semibold text-midnight shadow-[0_18px_60px_rgba(247,212,106,0.18)] transition hover:brightness-105"
+              >
+                Submit your 2025 goal
+              </a>
+              <a
+                href="#watch"
+                className="ny-glass rounded-xl px-6 py-3 text-sm font-semibold text-white/90 transition hover:bg-white/10"
+              >
+                Watch Greg’s latest update
+              </a>
             </div>
 
-            <div className="absolute bottom-4 ml-4 transform">
-              <p className="text-xs text-white/50">
-                <i>Sponsored by the FOA (Friends of Aaron Association)</i>
-              </p>
-              <p className="text-xs text-white/50">
-                <i>
-                  If you are not already part of this association, don't worry - you will be soon.
-                  Just meet Aaron.
-                </i>
-              </p>
+            <div className="pointer-events-auto absolute bottom-5 right-5">
+              <a
+                href="#/greg"
+                className="ny-glass rounded-lg px-3 py-2 text-xs text-white/75 transition hover:bg-white/10"
+              >
+                Greg
+              </a>
             </div>
           </div>
         </section>
-        <section id="rsvp" className="relative h-dvh snap-start overflow-hidden">
-          <div className="relative mx-auto flex h-full max-w-6xl flex-col justify-center px-6 py-6">
-            <div className="flex justify-center">
-              {/* RSVP Card */}
-              <div className="relative w-full max-w-2xl overflow-hidden rounded-3xl border border-pumpkin/40 bg-gradient-to-br from-pumpkin via-ember to-pumpkin/70 p-8 text-midnight shadow-[0_15px_45px_rgba(249,115,22,0.45)]">
-                <div className="absolute -right-12 top-1/2 h-48 w-full -translate-y-1/2 rounded-full border border-white/40 opacity-40" />
-                <div className="absolute -left-16 -top-16 rounded-full border border-white/40 opacity-30" />
-                <div className="relative flex flex-col gap-4">
-                  <div className="space-y-4">
-                    <h2 className="font-spooky text-4xl text-midnight lg:text-5xl">
-                      RSVP for you & your 👻
-                    </h2>
+
+        <section id="watch" className="relative h-dvh snap-start overflow-hidden">
+          <div className="mx-auto flex h-full max-w-5xl flex-col justify-center gap-6 px-6 py-10">
+            <h2 className="ny-title text-3xl font-semibold text-white md:text-4xl">
+              Greg’s Denver update
+            </h2>
+
+            <DramaticCountdown
+              msRemaining={msUntilNinePmEastern}
+              isReached={isDeadlineReached}
+              deadlineLabel="Goals lock at 9:00 PM EST"
+            />
+
+            {!supabaseRef.current ? (
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-white/80 backdrop-blur">
+                Supabase is not configured (missing `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY`).
+              </div>
+              ) : supabaseDataError ? (
+                <div className="rounded-2xl border border-rose-400/25 bg-rose-500/10 p-6 text-white/85 backdrop-blur">
+                  <div className="font-semibold text-white">Supabase setup issue</div>
+                  <div className="mt-2 text-sm text-white/80">{supabaseDataError}</div>
+                </div>
+            ) : latestUpdate ? (
+              <div className="grid gap-6 lg:grid-cols-2">
+                <div className="ny-glass relative overflow-hidden rounded-3xl p-6">
+                  <div className="ny-glow-orbs absolute inset-0 opacity-40" />
+                  <div className="relative">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <h3 className="ny-title text-xl font-semibold text-white">
+                        {latestUpdate.title}
+                      </h3>
+                      <span className="text-xs text-white/60">
+                        {formatWhen(latestUpdate.created_at)}
+                      </span>
+                    </div>
+                    <p className="mt-4 whitespace-pre-wrap text-white/75">{latestUpdate.body}</p>
                   </div>
-                  <form onSubmit={handleSubmit} className="space-y-6">
+                </div>
+                <div className="ny-glass overflow-hidden rounded-3xl bg-black/30">
+                  {latestUpdateVideoUrl ? (
+                    <video
+                      controls
+                      playsInline
+                      className="h-full w-full"
+                      src={latestUpdateVideoUrl}
+                      preload="metadata"
+                    />
+                  ) : (
+                    <div className="flex h-full min-h-[280px] items-center justify-center px-6 text-sm text-white/60">
+                      No video URL available.
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="ny-glass rounded-3xl p-6 text-white/80">
+                No update posted yet. Check back soon.
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section id="goals" className="relative h-dvh snap-start overflow-hidden">
+          <div className="mx-auto flex h-full max-w-5xl flex-col justify-center px-6 py-10">
+            <div className="flex items-end justify-between gap-4">
+              <h2 className="ny-title text-3xl font-semibold text-white md:text-4xl">Goals</h2>
+              <a
+                className="text-sm text-white/70 underline-offset-4 hover:underline"
+                href="#submit"
+              >
+                Add yours
+              </a>
+            </div>
+
+            <div className="ny-glass mt-6 overflow-hidden rounded-3xl">
+              <div className="max-h-[70vh] overflow-y-auto p-4 md:p-6">
+                {goals.length ? (
+                  <ul className="space-y-3">
+                    {goals.map((g) => (
+                      <li
+                        key={g.id}
+                        className="rounded-2xl border border-white/10 bg-gradient-to-r from-black/25 via-black/15 to-black/25 p-4"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-baseline gap-2">
+                            <span className="ny-title font-semibold text-white">{g.title}</span>
+                            <span className="text-sm text-white/60">by {g.display_name}</span>
+                          </div>
+                          <span className="text-xs text-white/50">{formatWhen(g.created_at)}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-white/60">No goals yet. Be the first.</p>
+                )}
+              </div>
+            </div>
+
+            <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 text-xs text-white/50">
+              <p>&copy; 2025 Virtual New Year’s Celebration</p>
+              <div className="flex items-center gap-3">
+                <a className="transition hover:text-white/70" href="#welcome">
+                  Top
+                </a>
+                <span aria-hidden="true">•</span>
+                <a className="transition hover:text-white/70" href="#watch">
+                  Greg
+                </a>
+                <span aria-hidden="true">•</span>
+                <a className="transition hover:text-white/70" href="#submit">
+                  Submit
+                </a>
+              </div>
+            </footer>
+          </div>
+        </section>
+
+        <section id="submit" className="relative h-dvh snap-start overflow-hidden">
+          <div className="mx-auto flex h-full max-w-5xl flex-col justify-center px-6 py-10">
+            <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="ny-glass relative overflow-hidden rounded-3xl p-8">
+                <div className="ny-glow-orbs absolute inset-0 opacity-35" />
+                <div className="relative">
+                  <h2 className="ny-title text-3xl font-semibold text-white md:text-4xl">
+                    Your 2025 goal
+                  </h2>
+                  <p className="mt-3 text-white/70">
+                    Write it like you mean it. Greg will read the title + who it’s from publicly.
+                    The full text is for Greg’s eyes only (we don’t fetch it on the public page).
+                  </p>
+
+                  <form onSubmit={handleGoalSubmit} className="mt-8 space-y-5">
                     <div>
-                      <label htmlFor="name" className="block text-lg font-semibold">
-                        Name
-                      </label>
+                      <label className="block text-sm font-medium text-white/75">Your name</label>
                       <input
-                        id="name"
-                        type="text"
-                        className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-4 py-3 text-lg text-black placeholder-black/40 shadow-sm focus:border-black/30 focus:outline-none"
-                        placeholder="e.g. Sally Skellington"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
+                        className="mt-2 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-ice/30"
+                        value={displayName}
+                        onChange={(e) => setDisplayName(e.target.value)}
+                        placeholder="e.g. Nicole"
                         required
                       />
                     </div>
                     <div>
-                      <label htmlFor="costume hint" className="block text-lg font-semibold">
-                        Costume Hint
-                      </label>
+                      <label className="block text-sm font-medium text-white/75">Short title</label>
                       <input
-                        id="costume hint"
-                        type="text"
-                        className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-4 py-3 text-lg text-black placeholder-black/40 shadow-sm focus:border-black/30 focus:outline-none"
-                        placeholder="e.g. Vampire Accountant 🧛‍♂️🧮"
-                        value={costume}
-                        onChange={(e) => setCostume(e.target.value)}
+                        className="mt-2 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-gold/25"
+                        value={goalTitle}
+                        onChange={(e) => setGoalTitle(e.target.value)}
+                        placeholder="e.g. Run a 10K"
+                        required
                       />
                     </div>
-                    <div className="flex items-center gap-4">
-                      <input
-                        id="coming"
-                        type="checkbox"
-                        className="h-5 w-5 rounded border-black/30 text-amber-600 focus:ring-amber-500"
-                        checked={coming}
-                        onChange={(e) => setComing(e.target.checked)}
-                      />
-                      <label htmlFor="coming" className="select-none text-lg">
-                        I'm coming!
+                    <div>
+                      <label className="block text-sm font-medium text-white/75">
+                        The full goal (Greg reads this)
                       </label>
+                      <textarea
+                        className="mt-2 h-36 w-full resize-none rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-aurora/25"
+                        value={goalText}
+                        onChange={(e) => setGoalText(e.target.value)}
+                        placeholder="Write the details, the why, the vibe…"
+                        required
+                      />
                     </div>
-                    {submitError ? (
-                      <p className="text-base font-medium text-red-900">{submitError}</p>
+
+                    {goalSubmitError ? (
+                      <p className="text-sm text-red-200">{goalSubmitError}</p>
                     ) : null}
-                    {submitSuccess ? (
-                      <p className="text-base font-medium text-green-900">{submitSuccess}</p>
+                    {goalSubmitSuccess ? (
+                      <p className="text-sm text-green-200">{goalSubmitSuccess}</p>
                     ) : null}
+
                     <button
+                      disabled={goalSubmitLoading || !supabaseRef.current}
+                      className="ny-sheen inline-flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-gold via-white to-ice px-6 py-4 text-sm font-semibold text-midnight shadow-[0_18px_60px_rgba(125,211,252,0.12)] disabled:opacity-60"
                       type="submit"
-                      className="inline-flex w-full items-center justify-center rounded-lg bg-midnight px-6 py-4 text-lg font-semibold text-amber-200 shadow hover:bg-black/90 disabled:opacity-60"
-                      disabled={submitLoading || !supabaseRef.current}
                     >
-                      {submitLoading
+                      {goalSubmitLoading
                         ? 'Submitting…'
                         : !supabaseRef.current
-                          ? 'RSVP unavailable'
-                          : 'Submit RSVP'}
+                          ? 'Unavailable'
+                          : 'Submit goal'}
                     </button>
                   </form>
                 </div>
               </div>
-            </div>
-          </div>
-        </section>
-        <section id="attendees" className="relative h-dvh snap-start overflow-hidden">
-          <div className="relative mx-auto flex h-full max-w-4xl flex-col justify-center px-6 py-12">
-            <div className="flex flex-col items-center">
-              <h2 className="mb-8 font-spooky text-4xl text-amber-200 lg:text-5xl">
-                Who's Coming
-              </h2>
-              {/* Attendees List */}
-              <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur">
-                <div className="max-h-[400px] overflow-y-auto rounded-lg bg-white/60 text-black shadow lg:max-h-[500px]">
-                  <ul className="divide-y divide-black/10">
-                    {attendees.map((a) => (
-                      <li key={a.id} className="px-4 py-3">
-                        <div className="flex items-baseline justify-between gap-3">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold">{a.name}</span>
-                            <span className="text-sm">{a.coming ? '✅' : '❌'}</span>
-                          </div>
-                          <span className="text-xs text-black/60">
-                            {new Date(a.created_at).toLocaleDateString()}
-                          </span>
-                        </div>
-                        {a.costume ? (
-                          <p className="text-sm text-black/80">Costume: {a.costume}</p>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-        <section
-          id="location"
-          className="relative mx-auto flex h-dvh max-w-4xl snap-start flex-col justify-center px-6 py-12"
-        >
-          <div className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-8 text-center backdrop-blur">
-            <h2 className="font-spooky text-4xl text-amber-200">Location</h2>
-            <iframe
-              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2847.5233128266973!2d-73.20575698746742!3d44.46344497095466!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x4cca7bb28d56ef3b%3A0x586fbfd8408f7e33!2s32%20Edgewood%20Ln%2C%20Burlington%2C%20VT%2005401!5e0!3m2!1sen!2sus!4v1760406547733!5m2!1sen!2sus"
-              className="h-full min-h-[450px] w-full"
-              style={{ border: 0 }}
-              loading="lazy"
-              referrerPolicy="no-referrer-when-downgrade"
-            ></iframe>
-          </div>
-        </section>
-        <section id="schedule" className="h-dvh snap-start">
-          <div className="relative mx-auto flex h-full max-w-4xl flex-col justify-center px-4 py-6">
-            <div className="grid gap-10 rounded-3xl border border-white/10 bg-white/5 p-8 backdrop-blur lg:grid-cols-[2fr_3fr]">
-              <div className="space-y-6">
-                <h2 className="font-spooky text-4xl text-amber-200">Evening Schedule</h2>
-              </div>
-              <ol className="space-y-4 border-l border-white/10 pl-2">
-                {schedule.map((item) => (
-                  <li key={item.title} className="relative pl-6">
-                    <span className="absolute -left-[15px] top-1.5 h-3 w-3 rounded-full bg-pumpkin shadow-[0_0_10px_rgba(249,115,22,0.7)]" />
-                    <div className="flex flex-col gap-1 rounded-lg bg-black/30 p-3">
-                      <span className="text-xs uppercase tracking-[0.3em] text-pumpkin">
-                        {item.time}
-                      </span>
-                      <h3 className="text-lg font-semibold text-white">{item.title}</h3>
-                      <p className="text-sm text-white/70">{item.detail}</p>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          </div>
 
-          <footer className="mt-auto border-t border-white/10 bg-black/40 py-10">
-            <div className="mx-auto flex max-w-4xl flex-col gap-3 px-6 text-sm text-white/60 md:flex-row md:items-center md:justify-between">
-              <p>&copy; 2025 Babies, Boos, and Booze. See you on Edgewood Lane.</p>
-              <div className="flex items-center gap-4">
-                <a className="transition hover:text-pumpkin" href="#schedule">
-                  Schedule
-                </a>
-                <span aria-hidden="true">•</span>
-                <a className="transition hover:text-pumpkin" href="#rsvp">
-                  RSVP
-                </a>
-                <span aria-hidden="true">•</span>
-                <a
-                  className="transition hover:text-pumpkin"
-                  href="https://maps.app.goo.gl/?q=32+Edgewood+Ln+Burlington+VT+05041"
-                >
-                  Directions
-                </a>
+              <div className="ny-glass rounded-3xl p-8">
+                <h3 className="ny-title text-xl font-semibold text-white">What happens next?</h3>
+                <ol className="mt-4 space-y-3 text-sm text-white/70">
+                  <li>
+                    <span className="font-semibold text-white/80">1.</span> Your goal gets added to
+                    the wall (title + name).
+                  </li>
+                  <li>
+                    <span className="font-semibold text-white/80">2.</span> Greg reads the full
+                    details and reacts.
+                  </li>
+                  <li>
+                    <span className="font-semibold text-white/80">3.</span> We start 2025 with
+                    momentum.
+                  </li>
+                </ol>
+                <p className="mt-6 text-xs text-white/50">
+                  Note: this is a tiny party site — we’re hiding the full goal text in the UI, not
+                  doing hardcore security.
+                </p>
               </div>
             </div>
-          </footer>
+          </div>
         </section>
       </div>
     </>
   )
 }
-
-useGLTF.preload('/jackolantern.glb')
 
 export default App

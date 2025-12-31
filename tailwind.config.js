@@ -4,19 +4,19 @@ export default {
   theme: {
     extend: {
       colors: {
-        midnight: '#0b0c1a',
-        pumpkin: '#f97316',
-        ember: '#facc15',
-        moonlight: '#f5f5f5',
-        poison: '#8b5cf6',
+        midnight: '#060917',
+        moonlight: '#eef2ff',
+        gold: '#f7d46a',
+        ice: '#7dd3fc',
+        aurora: '#a78bfa',
       },
       fontFamily: {
-        spooky: ['"Creepster"', 'cursive'],
-        body: ['"Poppins"', 'sans-serif'],
+        display: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
+        body: ['"Inter"', 'system-ui', 'sans-serif'],
       },
       backgroundImage: {
-        'haunted-gradient':
-          'radial-gradient(circle at 20% 20%, rgba(249,115,22,0.25), transparent 55%), radial-gradient(circle at 80% 30%, rgba(139,92,246,0.25), transparent 60%), linear-gradient(160deg, #0b0c1a 0%, #1e1b4b 100%)',
+        'ny-gradient':
+          'radial-gradient(circle at 18% 18%, rgba(247,212,106,0.14), transparent 55%), radial-gradient(circle at 78% 30%, rgba(125,211,252,0.14), transparent 60%), radial-gradient(circle at 45% 85%, rgba(167,139,250,0.14), transparent 60%), linear-gradient(160deg, #060917 0%, #0b1030 100%)',
       },
     },
   },

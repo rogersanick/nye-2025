@@ -65,15 +65,15 @@ const ScrollIndicator: React.FC = () => {
           <div key={index} className="relative mb-3 flex items-center md:mb-4">
             <button
               aria-label={`Go to ${section.id}`}
-              className={`h-2.5 w-2.5 transform rounded-full shadow-[0_0_8px_rgba(249,115,22,0.4)] ring-1 ring-black/40 transition-all duration-200 hover:scale-125 md:h-3 md:w-3 md:shadow-[0_0_12px_rgba(249,115,22,0.6)] md:ring-2 md:hover:scale-150 ${
-                isActive ? 'bg-pumpkin' : 'bg-ember/50 hover:bg-pumpkin'
+              className={`h-2.5 w-2.5 transform rounded-full shadow-[0_0_10px_rgba(247,212,106,0.35)] ring-1 ring-white/10 transition-all duration-200 hover:scale-125 md:h-3 md:w-3 md:shadow-[0_0_14px_rgba(125,211,252,0.35)] md:ring-2 md:hover:scale-150 ${
+                isActive ? 'bg-gold' : 'bg-white/20 hover:bg-ice'
               }`}
               onPointerEnter={() => setHoveredSection(index)}
               onPointerLeave={() => setHoveredSection(null)}
               onClick={() => scrollToSection(index)}
             >
               <span
-                className={`pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 transform whitespace-nowrap rounded-md bg-black/80 px-2 py-1 font-spooky text-xs tracking-wider text-amber-200 backdrop-blur transition-opacity duration-200 md:mr-3 ${
+                className={`pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 transform whitespace-nowrap rounded-md border border-white/10 bg-black/70 px-2 py-1 font-display text-xs tracking-wider text-moonlight backdrop-blur transition-opacity duration-200 md:mr-3 ${
                   isHovered ? 'opacity-100' : 'opacity-0'
                 }`}
               >
