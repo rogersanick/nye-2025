@@ -737,14 +737,14 @@ function App() {
 
                 <h1 className="ny-title mt-4 text-balance text-4xl font-bold tracking-tight sm:mt-6 sm:text-5xl md:text-7xl">
                   <span className="ny-sheen block bg-gradient-to-r from-gold via-ice to-aurora bg-clip-text text-transparent">
-                    2025
+                    2026
                   </span>
                   <span className="mt-1 block text-white sm:mt-2">{`New Year's Goals`}</span>
                 </h1>
 
                 <p className="mt-4 max-w-2xl text-pretty text-base leading-relaxed text-white/75 sm:mt-5 sm:text-lg">
-                  Drop your 2025 goal in Goals 4 Greg. Greg will read them aloud and deliver
-                  commentary. Next year, you WILL be held accountable.
+                  Drop your 2026 New Year's goal as we leave 2025 behind. Greg will read them aloud and deliver
+                  commentary. Next year, you WILL be held accountable 🫵. Make this year count! 
                 </p>
 
                 <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-white/80 backdrop-blur sm:mt-6">
