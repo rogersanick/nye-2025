@@ -727,27 +727,27 @@ function App() {
         <ScrollIndicator />
 
         <section id="welcome" className="relative h-dvh snap-start overflow-hidden">
-          <div className="relative mx-auto flex h-full max-w-5xl flex-col items-center justify-center px-6 text-center">
-            <div className="relative w-full max-w-3xl overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-7 backdrop-blur sm:p-10">
+          <div className="relative mx-auto flex h-full max-w-5xl flex-col items-center justify-center px-8 text-center sm:px-6">
+            <div className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur sm:max-w-2xl sm:p-10">
               <div className="ny-glow-orbs pointer-events-none absolute inset-0 opacity-35" />
               <div className="relative">
                 <span className="ny-glass-strong ny-sheen inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-white/85">
                   New Year’s • 2025 • Virtual
                 </span>
 
-                <h1 className="ny-title mt-6 text-balance text-5xl font-bold tracking-tight md:text-7xl">
+                <h1 className="ny-title mt-4 text-balance text-4xl font-bold tracking-tight sm:mt-6 sm:text-5xl md:text-7xl">
                   <span className="ny-sheen block bg-gradient-to-r from-gold via-ice to-aurora bg-clip-text text-transparent">
                     2025
                   </span>
-                  <span className="mt-2 block text-white">{`New Year's Goals`}</span>
+                  <span className="mt-1 block text-white sm:mt-2">{`New Year's Goals`}</span>
                 </h1>
 
-                <p className="mt-5 max-w-2xl text-pretty text-lg leading-relaxed text-white/75">
+                <p className="mt-4 max-w-2xl text-pretty text-base leading-relaxed text-white/75 sm:mt-5 sm:text-lg">
                   Drop your 2025 goal in Goals 4 Greg. Greg will read them aloud and deliver
                   commentary. Next year, you WILL be held accountable.
                 </p>
 
-                <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-white/80 backdrop-blur">
+                <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-white/80 backdrop-blur sm:mt-6">
                   <span className="uppercase tracking-[0.28em] text-white/70">Submitted so far</span>
                   <span className="text-white/50">•</span>
                   <ScrollingNumber
@@ -759,18 +759,18 @@ function App() {
                   />
                 </div>
 
-                <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+                <div className="mt-7 flex flex-wrap items-center justify-center gap-3 sm:mt-10">
                   <a
                     href="#submit"
-                    className="ny-sheen rounded-xl bg-gradient-to-r from-gold via-white to-ice px-6 py-3 text-sm font-semibold text-midnight shadow-[0_18px_60px_rgba(247,212,106,0.18)] transition hover:brightness-105"
+                    className="ny-sheen rounded-xl bg-gradient-to-r from-gold via-white to-ice px-5 py-2.5 text-sm font-semibold text-midnight shadow-[0_18px_60px_rgba(247,212,106,0.18)] transition hover:brightness-105 sm:px-6 sm:py-3"
                   >
-                    Submit your 2025 goal
+                    Submit a goal
                   </a>
                   <a
                     href="#watch"
-                    className="ny-glass rounded-xl px-6 py-3 text-sm font-semibold text-white/90 transition hover:bg-white/10"
+                    className="ny-glass rounded-xl px-5 py-2.5 text-sm font-semibold text-white/90 transition hover:bg-white/10 sm:px-6 sm:py-3"
                   >
-                    Watch Greg’s latest update
+                    Watch Greg’s Ratification
                   </a>
                 </div>
               </div>
