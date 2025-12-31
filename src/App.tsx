@@ -8,6 +8,7 @@ import ExplosionConfetti from './components/confetti'
 import { ShaderFireworks } from './components/ShaderFireworks'
 import DramaticCountdown from './components/DramaticCountdown'
 import StockTickerBanner from './components/StockTickerBanner'
+import ScrollingNumber from './components/ScrollingNumber'
 import { createClient } from './lib/supabaseClient'
 
 type GoalPublicRow = {
@@ -298,6 +299,7 @@ function App() {
 
   // Guest: goals list (NO goal_text fetched here)
   const [goals, setGoals] = useState<GoalPublicRow[]>([])
+  const [goalCount, setGoalCount] = useState(0)
 
   // Guest: latest Greg update
   const [latestUpdate, setLatestUpdate] = useState<GregUpdateRow | null>(null)
@@ -345,8 +347,11 @@ function App() {
     if (!sb) return
 
     const load = async () => {
-      const [{ data: goalsData, error: goalsError }, { data: updateData, error: updateError }] =
-        await Promise.all([
+      const [
+        { data: goalsData, error: goalsError },
+        { data: updateData, error: updateError },
+        { count: goalsExactCount, error: goalsCountError },
+      ] = await Promise.all([
           sb
             .from('goals_2025')
             .select('id,display_name,title,created_at')
@@ -358,20 +363,51 @@ function App() {
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle(),
+          sb.from('goals_2025').select('id', { count: 'exact', head: true }),
         ])
 
-      const pretty = formatSupabaseDataError((goalsError ?? updateError) as any)
+      const pretty = formatSupabaseDataError((goalsError ?? updateError ?? goalsCountError) as any)
       setSupabaseDataError(pretty)
       if (pretty && import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.warn('Supabase data load error:', { goalsError, updateError })
+        console.warn('Supabase data load error:', { goalsError, updateError, goalsCountError })
       }
 
       setGoals((goalsData ?? []) as GoalPublicRow[])
       setLatestUpdate((updateData ?? null) as GregUpdateRow | null)
+      setGoalCount(
+        typeof goalsExactCount === 'number' ? goalsExactCount : (goalsData ?? []).length ?? 0,
+      )
     }
 
     void load()
+  }, [])
+
+  useEffect(() => {
+    const sb = supabaseRef.current
+    if (!sb) return
+
+    const channel = sb
+      .channel('goals_2025_goalcount')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'goals_2025' },
+        (payload) => {
+          const row = payload.new as GoalPublicRow | null
+          if (row?.id) {
+            setGoals((prev) => {
+              if (prev.some((g) => g.id === row.id)) return prev
+              return [row, ...prev].slice(0, 50)
+            })
+          }
+          setGoalCount((c) => (Number.isFinite(c) ? c + 1 : c))
+        },
+      )
+      .subscribe()
+
+    return () => {
+      void channel.unsubscribe()
+    }
   }, [])
 
   useEffect(() => {
@@ -412,7 +448,11 @@ function App() {
     } else if (data) {
       setGoalSubmitSuccess('Locked in. Greg will read it aloud in Denver.')
       setConfetti(true)
-      setGoals((prev) => [data as GoalPublicRow, ...prev])
+      setGoals((prev) => {
+        const next = [data as GoalPublicRow, ...prev].slice(0, 50)
+        setGoalCount((c) => (Number.isFinite(c) ? c + 1 : next.length))
+        return next
+      })
       setDisplayName('')
       setGoalTitle('')
       setGoalText('')
@@ -706,6 +746,18 @@ function App() {
                   Drop your 2025 goal in Goals 4 Greg. Greg will read them aloud and deliver
                   commentary. Next year, you WILL be held accountable.
                 </p>
+
+                <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-white/80 backdrop-blur">
+                  <span className="uppercase tracking-[0.28em] text-white/70">Submitted so far</span>
+                  <span className="text-white/50">•</span>
+                  <ScrollingNumber
+                    value={goalCount}
+                    className="text-white"
+                    digitClassName="text-white"
+                    durationMs={950}
+                    startDelayMs={300}
+                  />
+                </div>
 
                 <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
                   <a
