@@ -696,7 +696,7 @@ function App() {
         <section id="watch" className="relative h-dvh snap-start overflow-hidden">
           <div className="mx-auto flex h-full max-w-5xl flex-col justify-center gap-6 px-6 py-10">
             <h2 className="ny-title text-3xl font-semibold text-white md:text-4xl">
-              Greg’s Denver update
+              Greg’s NYE Goal Ratification
             </h2>
 
             <DramaticCountdown
@@ -896,10 +896,6 @@ function App() {
                     momentum.
                   </li>
                 </ol>
-                <p className="mt-6 text-xs text-white/50">
-                  Note: this is a tiny party site — we’re hiding the full goal text in the UI, not
-                  doing hardcore security.
-                </p>
               </div>
             </div>
           </div>
