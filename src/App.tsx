@@ -7,6 +7,7 @@ import ScrollIndicator from './components/ScrollIndicator'
 import ExplosionConfetti from './components/confetti'
 import { ShaderFireworks } from './components/ShaderFireworks'
 import DramaticCountdown from './components/DramaticCountdown'
+import StockTickerBanner from './components/StockTickerBanner'
 import { createClient } from './lib/supabaseClient'
 
 type GoalPublicRow = {
@@ -665,6 +666,7 @@ function App() {
 
   return (
     <>
+      <StockTickerBanner />
       <Canvas
         dpr={[1, 1.5]}
         camera={{ position: [0, 1.2, 7], fov: 45 }}
@@ -680,42 +682,46 @@ function App() {
       <div
         id="scroll-container"
         ref={scrollContainerRef}
-        className="relative h-dvh snap-y snap-mandatory overflow-y-auto text-moonlight"
+        className="relative box-border h-dvh snap-y snap-mandatory overflow-y-auto pt-7 text-moonlight sm:pt-8"
       >
         <ScrollIndicator />
 
         <section id="welcome" className="relative h-dvh snap-start overflow-hidden">
           <div className="relative mx-auto flex h-full max-w-5xl flex-col items-center justify-center px-6 text-center">
-            <div className="ny-glow-orbs pointer-events-none absolute inset-0 -z-10" />
+            <div className="relative w-full max-w-3xl overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-7 backdrop-blur sm:p-10">
+              <div className="ny-glow-orbs pointer-events-none absolute inset-0 opacity-35" />
+              <div className="relative">
+                <span className="ny-glass-strong ny-sheen inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-white/85">
+                  New Year’s • 2025 • Virtual
+                </span>
 
-            <span className="ny-glass-strong ny-sheen inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-white/85">
-              New Year’s • 2025 • Virtual
-            </span>
+                <h1 className="ny-title mt-6 text-balance text-5xl font-bold tracking-tight md:text-7xl">
+                  <span className="ny-sheen block bg-gradient-to-r from-gold via-ice to-aurora bg-clip-text text-transparent">
+                    2025
+                  </span>
+                  <span className="mt-2 block text-white">{`New Year's Goals`}</span>
+                </h1>
 
-            <h1 className="ny-title mt-6 text-balance text-5xl font-bold tracking-tight md:text-7xl">
-              <span className="ny-sheen block bg-gradient-to-r from-gold via-ice to-aurora bg-clip-text text-transparent">
-                2025
-              </span>
-              <span className="mt-2 block text-white">{`New Year's Goals`}</span>
-            </h1>
+                <p className="mt-5 max-w-2xl text-pretty text-lg leading-relaxed text-white/75">
+                  Drop your 2025 goal in Goals 4 Greg. Greg will read them aloud and deliver
+                  commentary. Next year, you WILL be held accountable.
+                </p>
 
-            <p className="mt-5 max-w-2xl text-pretty text-lg leading-relaxed text-white/75">
-              Drop your 2025 goal. Greg (my dad) — will read them aloud and deliver commentary.
-            </p>
-
-            <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-              <a
-                href="#submit"
-                className="ny-sheen rounded-xl bg-gradient-to-r from-gold via-white to-ice px-6 py-3 text-sm font-semibold text-midnight shadow-[0_18px_60px_rgba(247,212,106,0.18)] transition hover:brightness-105"
-              >
-                Submit your 2025 goal
-              </a>
-              <a
-                href="#watch"
-                className="ny-glass rounded-xl px-6 py-3 text-sm font-semibold text-white/90 transition hover:bg-white/10"
-              >
-                Watch Greg’s latest update
-              </a>
+                <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+                  <a
+                    href="#submit"
+                    className="ny-sheen rounded-xl bg-gradient-to-r from-gold via-white to-ice px-6 py-3 text-sm font-semibold text-midnight shadow-[0_18px_60px_rgba(247,212,106,0.18)] transition hover:brightness-105"
+                  >
+                    Submit your 2025 goal
+                  </a>
+                  <a
+                    href="#watch"
+                    className="ny-glass rounded-xl px-6 py-3 text-sm font-semibold text-white/90 transition hover:bg-white/10"
+                  >
+                    Watch Greg’s latest update
+                  </a>
+                </div>
+              </div>
             </div>
           </div>
         </section>

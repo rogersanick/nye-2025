@@ -45,7 +45,9 @@ export default function DramaticCountdown({
 
   // Starts building pressure in the final 6 hours (0..1).
   const pressure = useMemo(() => {
-    const windowMs = 6 * 60 * 60 * 1000
+    // Build "pressure" over the final 24 hours leading into the deadline (0..1).
+    // This makes the percentage useful for the whole day-of, not just the last few hours.
+    const windowMs = 24 * 60 * 60 * 1000
     const p = 1 - msRemaining / windowMs
     return Math.min(1, Math.max(0, p))
   }, [msRemaining])
