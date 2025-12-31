@@ -852,7 +852,7 @@ function App() {
                         className="mt-2 h-36 w-full resize-none rounded-xl border border-white/15 bg-black/25 px-4 py-3 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-aurora/25"
                         value={goalText}
                         onChange={(e) => setGoalText(e.target.value)}
-                        placeholder="Write the details, the why, the vibe…"
+                        placeholder="Write the details, the why, the how…"
                         required
                       />
                     </div>
