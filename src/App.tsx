@@ -663,8 +663,7 @@ function App() {
             </h1>
 
             <p className="mt-5 max-w-2xl text-pretty text-lg leading-relaxed text-white/75">
-              Drop your 2025 goal. Greg (my dad) is in Denver — he’ll read them aloud and deliver
-              elite dad commentary.
+              Drop your 2025 goal. Greg (my dad) — will read them aloud and deliver commentary.
             </p>
 
             <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
