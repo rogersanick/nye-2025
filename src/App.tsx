@@ -239,12 +239,6 @@ function getZonedDateParts(date: Date, timeZone: string): DateParts {
   }
 }
 
-function addDaysToYmd(ymd: Pick<DateParts, 'year' | 'month' | 'day'>, days: number) {
-  const base = new Date(Date.UTC(ymd.year, ymd.month - 1, ymd.day))
-  base.setUTCDate(base.getUTCDate() + days)
-  return { year: base.getUTCFullYear(), month: base.getUTCMonth() + 1, day: base.getUTCDate() }
-}
-
 function getTimeZoneOffsetMs(date: Date, timeZone: string) {
   const p = getZonedDateParts(date, timeZone)
   const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)
@@ -263,12 +257,10 @@ function zonedTimeToUtc(parts: DateParts, timeZone: string) {
   return utc
 }
 
-function getNextNinePmEasternUtc(now: Date) {
+function getGoalsDeadlineEasternUtc() {
   const tz = 'America/New_York'
-  const p = getZonedDateParts(now, tz)
-  const isBeforeNinePm = p.hour < 21
-  const ymd = addDaysToYmd({ year: p.year, month: p.month, day: p.day }, isBeforeNinePm ? 0 : 1)
-  return zonedTimeToUtc({ ...ymd, hour: 21, minute: 0, second: 0 }, tz)
+  // NYE deadline: Dec 31, 2025 @ 9:00 PM ET
+  return zonedTimeToUtc({ year: 2025, month: 12, day: 31, hour: 21, minute: 0, second: 0 }, tz)
 }
 
 function sanitizeFilename(name: string) {
@@ -311,21 +303,42 @@ function App() {
     return () => window.clearInterval(t)
   }, [])
 
-  const nextNinePmEasternUtc = useMemo(
-    () => getNextNinePmEasternUtc(new Date(countdownNowMs)),
-    [countdownNowMs],
-  )
+  const goalsDeadlineUtc = useMemo(() => {
+    // Optional override: set a fixed UTC ISO string in env, e.g. 2026-01-01T02:00:00.000Z
+    const raw = (import.meta.env.VITE_GOALS_DEADLINE_UTC_ISO as string | undefined)?.trim()
+    if (raw) {
+      const d = new Date(raw)
+      if (!Number.isNaN(d.getTime())) return d
+    }
+    return getGoalsDeadlineEasternUtc()
+  }, [])
 
-  const msUntilNinePmEastern = nextNinePmEasternUtc.getTime() - countdownNowMs
-  const isDeadlineReached = msUntilNinePmEastern <= 0
+  const msUntilGoalsDeadline = goalsDeadlineUtc.getTime() - countdownNowMs
+  const isDeadlineReached = msUntilGoalsDeadline <= 0
+
+  // Public "live" video fallback (when Greg hasn't posted an update row yet).
+  // Prefer configuring via env, but default to the known public URL.
+  const liveVideoUrl =
+    (import.meta.env.VITE_LIVE_VIDEO_URL as string | undefined) ??
+    'https://qntwlcnurnysqewxkrmc.supabase.co/storage/v1/object/public/greg-videos/IMG_2295.MOV'
 
   const latestUpdateVideoUrl = useMemo(() => {
     if (!latestUpdate?.video_path) return null
     const sb = supabaseRef.current
     if (!sb) return null
-    const { data } = sb.storage.from('greg-videos').getPublicUrl(latestUpdate.video_path)
+    const raw = latestUpdate.video_path.trim()
+    if (!raw) return null
+
+    // Accept either a full public URL OR a storage object path.
+    // - If a URL was manually pasted into the DB, use it directly.
+    // - If it's a storage path, resolve it via the Supabase Storage client.
+    if (/^https?:\/\//i.test(raw)) return raw
+
+    const { data } = sb.storage.from('greg-videos').getPublicUrl(raw)
     return data.publicUrl
   }, [latestUpdate?.video_path])
+
+  const watchVideoUrl = latestUpdateVideoUrl ?? liveVideoUrl
 
   // Greg page: password gate
   const expectedPassword = (import.meta.env.VITE_GREG_PAGE_PASSWORD as string | undefined) ?? ''
@@ -421,6 +434,10 @@ function App() {
     const sb = supabaseRef.current
     if (!sb) {
       setGoalSubmitError('Supabase is not configured. Missing env vars.')
+      return
+    }
+    if (isDeadlineReached) {
+      setGoalSubmitError('Submissions are closed.')
       return
     }
 
@@ -761,10 +778,10 @@ function App() {
 
                 <div className="mt-7 flex flex-wrap items-center justify-center gap-3 sm:mt-10">
                   <a
-                    href="#submit"
+                    href={isDeadlineReached ? '#watch' : '#submit'}
                     className="ny-sheen rounded-xl bg-gradient-to-r from-gold via-white to-ice px-5 py-2.5 text-sm font-semibold text-midnight shadow-[0_18px_60px_rgba(247,212,106,0.18)] transition hover:brightness-105 sm:px-6 sm:py-3"
                   >
-                    Submit a goal
+                    {isDeadlineReached ? 'Submissions closed' : 'Submit a goal'}
                   </a>
                   <a
                     href="#watch"
@@ -785,7 +802,7 @@ function App() {
             </h2>
 
             <DramaticCountdown
-              msRemaining={msUntilNinePmEastern}
+              msRemaining={msUntilGoalsDeadline}
               isReached={isDeadlineReached}
               deadlineLabel="Goals lock at 9:00 PM EST"
             />
@@ -800,29 +817,38 @@ function App() {
                 <div className="font-semibold text-white">Supabase setup issue</div>
                 <div className="mt-2 text-sm text-white/80">{supabaseDataError}</div>
               </div>
-            ) : latestUpdate ? (
+            ) : (
               <div className="grid gap-6 lg:grid-cols-2">
                 <div className="ny-glass relative overflow-hidden rounded-3xl p-6">
                   <div className="ny-glow-orbs absolute inset-0 opacity-40" />
                   <div className="relative">
                     <div className="flex items-baseline justify-between gap-3">
                       <h3 className="ny-title text-xl font-semibold text-white">
-                        {latestUpdate.title}
+                        {latestUpdate?.title ?? 'Live now'}
                       </h3>
-                      <span className="text-xs text-white/60">
-                        {formatWhen(latestUpdate.created_at)}
-                      </span>
+                      {latestUpdate?.created_at ? (
+                        <span className="text-xs text-white/60">
+                          {formatWhen(latestUpdate.created_at)}
+                        </span>
+                      ) : (
+                        <span className="text-xs font-semibold uppercase tracking-[0.25em] text-rose-200/80">
+                          Live
+                        </span>
+                      )}
                     </div>
-                    <p className="mt-4 whitespace-pre-wrap text-white/75">{latestUpdate.body}</p>
+                    <p className="mt-4 whitespace-pre-wrap text-white/75">
+                      {latestUpdate?.body ??
+                        'Greg is live - see you in 2026!'}
+                    </p>
                   </div>
                 </div>
                 <div className="ny-glass overflow-hidden rounded-3xl bg-black/30">
-                  {latestUpdateVideoUrl ? (
+                  {watchVideoUrl ? (
                     <video
                       controls
                       playsInline
                       className="h-full w-full"
-                      src={latestUpdateVideoUrl}
+                      src={watchVideoUrl}
                       preload="metadata"
                     />
                   ) : (
@@ -831,10 +857,6 @@ function App() {
                     </div>
                   )}
                 </div>
-              </div>
-            ) : (
-              <div className="ny-glass rounded-3xl p-6 text-white/80">
-                No update posted yet. Check back soon.
               </div>
             )}
           </div>
@@ -913,59 +935,68 @@ function App() {
                     The full text is for Greg’s eyes only (we don’t fetch it on the public page).
                   </p>
 
-                  <form onSubmit={handleGoalSubmit} className="mt-8 space-y-5">
-                    <div>
-                      <label className="block text-sm font-medium text-white/75">Your name</label>
-                      <input
-                        className="mt-2 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-2.5 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-ice/30 md:py-3"
-                        value={displayName}
-                        onChange={(e) => setDisplayName(e.target.value)}
-                        placeholder="e.g. Nicole"
-                        required
-                      />
+                  {isDeadlineReached ? (
+                    <div className="mt-8 rounded-2xl border border-white/10 bg-black/25 p-5 text-white/80">
+                      <div className="text-sm font-semibold text-white/90">Submissions are closed.</div>
+                      <div className="mt-2 text-sm text-white/70">
+                        The countdown hit zero—no more goals can be added. Scroll up to watch Greg.
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-white/75">Short title</label>
-                      <input
-                        className="mt-2 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-2.5 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-gold/25 md:py-3"
-                        value={goalTitle}
-                        onChange={(e) => setGoalTitle(e.target.value)}
-                        placeholder="e.g. Run a 10K"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-white/75">
-                        The full goal (Greg reads this)
-                      </label>
-                      <textarea
-                        className="mt-2 h-28 w-full resize-none rounded-xl border border-white/15 bg-black/25 px-4 py-2.5 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-aurora/25 md:h-36 md:py-3"
-                        value={goalText}
-                        onChange={(e) => setGoalText(e.target.value)}
-                        placeholder="Write the details, the why, the how…"
-                        required
-                      />
-                    </div>
+                  ) : (
+                    <form onSubmit={handleGoalSubmit} className="mt-8 space-y-5">
+                      <div>
+                        <label className="block text-sm font-medium text-white/75">Your name</label>
+                        <input
+                          className="mt-2 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-2.5 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-ice/30 md:py-3"
+                          value={displayName}
+                          onChange={(e) => setDisplayName(e.target.value)}
+                          placeholder="e.g. Nicole"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-white/75">Short title</label>
+                        <input
+                          className="mt-2 w-full rounded-xl border border-white/15 bg-black/25 px-4 py-2.5 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-gold/25 md:py-3"
+                          value={goalTitle}
+                          onChange={(e) => setGoalTitle(e.target.value)}
+                          placeholder="e.g. Run a 10K"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-white/75">
+                          The full goal (Greg reads this)
+                        </label>
+                        <textarea
+                          className="mt-2 h-28 w-full resize-none rounded-xl border border-white/15 bg-black/25 px-4 py-2.5 text-white placeholder-white/35 outline-none ring-1 ring-transparent focus:border-white/30 focus:ring-aurora/25 md:h-36 md:py-3"
+                          value={goalText}
+                          onChange={(e) => setGoalText(e.target.value)}
+                          placeholder="Write the details, the why, the how…"
+                          required
+                        />
+                      </div>
 
-                    {goalSubmitError ? (
-                      <p className="text-sm text-red-200">{goalSubmitError}</p>
-                    ) : null}
-                    {goalSubmitSuccess ? (
-                      <p className="text-sm text-green-200">{goalSubmitSuccess}</p>
-                    ) : null}
+                      {goalSubmitError ? (
+                        <p className="text-sm text-red-200">{goalSubmitError}</p>
+                      ) : null}
+                      {goalSubmitSuccess ? (
+                        <p className="text-sm text-green-200">{goalSubmitSuccess}</p>
+                      ) : null}
 
-                    <button
-                      disabled={goalSubmitLoading || !supabaseRef.current}
-                      className="ny-sheen inline-flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-gold via-white to-ice px-6 py-3 text-sm font-semibold text-midnight shadow-[0_18px_60px_rgba(125,211,252,0.12)] disabled:opacity-60 md:py-4"
-                      type="submit"
-                    >
-                      {goalSubmitLoading
-                        ? 'Submitting…'
-                        : !supabaseRef.current
-                          ? 'Unavailable'
-                          : 'Submit goal'}
-                    </button>
-                  </form>
+                      <button
+                        disabled={goalSubmitLoading || !supabaseRef.current}
+                        className="ny-sheen inline-flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-gold via-white to-ice px-6 py-3 text-sm font-semibold text-midnight shadow-[0_18px_60px_rgba(125,211,252,0.12)] disabled:opacity-60 md:py-4"
+                        type="submit"
+                      >
+                        {goalSubmitLoading
+                          ? 'Submitting…'
+                          : !supabaseRef.current
+                            ? 'Unavailable'
+                            : 'Submit goal'}
+                      </button>
+                    </form>
+                  )}
                 </div>
               </div>
 

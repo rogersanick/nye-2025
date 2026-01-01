@@ -88,7 +88,7 @@ export default function DramaticCountdown({
             </div>
             {isReached ? (
               <span className="inline-flex items-center rounded-full border border-red-300/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-100">
-                Deadline reached
+                Submissions closed
               </span>
             ) : lastTen ? (
               <span className="inline-flex items-center rounded-full border border-red-300/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-100">
@@ -106,7 +106,9 @@ export default function DramaticCountdown({
           </div>
 
           <p className="mt-2 text-sm text-white/65">
-            Submit before it hits zero. When the clock runs out, the form closes.
+            {isReached
+              ? 'Time is up. Goals are locked.'
+              : 'Submit before it hits zero. When the clock runs out, the form closes.'}
           </p>
         </div>
 
